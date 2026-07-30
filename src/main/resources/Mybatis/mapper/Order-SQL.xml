@@ -1,0 +1,37 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "https://mybatis.org/dtd/mybatis-3-mapper.dtd">
+
+<mapper namespace="com.reservation.seat_reservation.Mapper.OrderMapper">
+    <insert id="setOrderPending">
+        insert into reservation.order_info (
+            merchant_uid,
+            goods_idx,
+            member_idx,
+            address,
+            order_date,
+            shipment,
+            iscancel,
+            order_status )
+        values (
+            #{orderNumStr},
+            #{goodsIdx},
+            #{memberIdx},
+            #{address},
+            #{orderDate},
+            'N',
+            'N',
+            'PENDING' )
+    </insert>
+
+    <update id="updateToPaid">
+        update reservation.order_info
+        set
+            order_status = 'PAID',
+            address = #{address}
+        where merchant_uid = #{merchantUid}
+         and idx = #{orderIdx}
+         and order_status = 'PENDING'
+    </update>
+
+
+</mapper>

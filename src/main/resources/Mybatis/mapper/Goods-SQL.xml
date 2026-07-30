@@ -1,0 +1,41 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "https://mybatis.org/dtd/mybatis-3-mapper.dtd">
+
+<mapper namespace="com.reservation.seat_reservation.Mapper.GoodsMapper">
+    <select id="getAllGoods" resultType="com.reservation.seat_reservation.Dto.GoodsResponseDto">
+        select g.idx,
+            g.goods_name as goodsName,
+            g.price,
+            g.quantity,
+            c.category_name as categoryName
+        from reservation.goods g
+            join reservation.category c on g.category_idx = c.idx
+        order by g.idx desc
+        limit 20
+    </select>
+
+    <select id="getOneGoods" resultType="com.reservation.seat_reservation.Dto.GoodsResponseDto">
+        select
+            g.idx,
+            g.goods_name as goodsName,
+            g.price,
+            g.quantity,
+            g.description,
+            g.registe_date,
+            c.category_name as categoryName
+        from reservation.goods g
+        join reservation.category c on g.category_idx = c.idx
+        where g.idx = #{goodsIdx}
+
+    </select>
+
+    <update id="buyGoods" >
+        update reservation.goods
+        set
+            quantity = quantity - 1
+        where idx = #{goodsIdx}
+        and quantity > 0
+    </update>
+
+
+</mapper>
