@@ -131,11 +131,70 @@ CREATE TABLE reservation.member (
 - **결과**: `UPDATE` 조건절에 의존하여 재고가 음수로 내려가는 것은 방지하였으나, 조회 단계에서 모든 스레드가 통과하여 DB에 불필요한 UPDATE 락 경합이 발생했습니다.
 
  <img width="1422" height="220" alt="Image" src="https://github.com/user-attachments/assets/4ae02b14-524c-4845-83c6-e58951f8bb6d" />
+ 
+ [비관적 락 미적용.pdf](https://github.com/user-attachments/files/30687888/default.pdf)
+
+##### [락 미적용 상태 (No Lock) 로그 분석] 
+ **핵심 요약**: 락이 없어 복수의 스레드가 동시에 `SELECT`를 통과하며, 실패할 스레드도 DB `UPDATE` 쿼리까지 진행되어 불필요한 DB 락 경합을 유발합니다.
+```text
+  [thread-71] buyGoods : Updates: 1  --> 71번 스레드가 먼저 1개 남은 재고 차감 성공!
+  [thread-55] buyGoods : Updates: 0  --> 55번 스레드는 UPDATE의 'WHERE quantity > 0' 조건에 걸려 실패!
+  java.lang.IllegalStateException: 다른분이 먼저 결제를 하여 품절된 상품입니다. (GoodsService.java:66)
+```
+- 상황: thread-55와 thread-71이 동시에 SELECT를 통과하여 둘 다 *"재고 1개 존재"*로 오판했습니다.
+
+- 결과: thread-55는 실행되지 않아도 될 DB UPDATE 쿼리를 불필요하게 날린 뒤 updateRow == 0을 받고 예외로 튕겨 나갔습니다.
+
+##### if 검증 조건절에서 거부
+```text
+[thread-65] getOneGoods : Parameters: 1(Long) -> Total: 1 (조회 시점에 이미 quantity = 0)
+java.lang.IllegalStateException: 이미 품절된 상품입니다. (GoodsService.java:54)
+```
+- 상황: thread-71이 재고를 0으로 만든 직후, 뒤늦게 SELECT 조회를 실행한 스레드들입니다.
+
+- 결과: 이미 DB 상 quantity가 0이므로 서비스 코드 54번째 줄(if (goods.getQuantity() <= 0))에서 즉시 차단되었습니다.
+
+---
 
 #### 2. 3단계: 비관적 락 적용 상태 (`SELECT ... FOR UPDATE`)
 - **개선점**: 상품 조회 시 DB 수준에서 **배타적 락(X-Lock)**을 점유하여, 선두 1번 스레드가 커밋될 때까지 후속 99개 스레드는 조회 단계에서 **대기(Lock Wait)** 상태로 차단됩니다.
 - **소요 시간 증가 이유 (204ms)**:
     - 병렬 처리(Parallel) 방식에서 **줄 서기(Sequential Order)** 구조로 전환됨에 따라 앞선 트랜잭션의 처리를 대기하는 시간(Lock Wait)이 추가되었습니다.
-    - 약 0.02초~0.05초 수준의 미미한 대기시간(Trade-off)을 대가로, 한정판 선점 시스템의 가장 중요한 가치인 데이터 무결성(Race Condition 차단)을 달성했습니다.
+    - 약 0.02초~0.05초 수준의 미미한 대기시간(Trade-off)을 대가로, 수량 1개 선점 시스템의 가장 중요한 가치인 데이터 무결성(Race Condition 차단)을 달성했습니다.
       
 <img width="1427" height="219" alt="Image" src="https://github.com/user-attachments/assets/cdac2a1d-0624-4485-93cb-07dd86b7fe08" />
+
+[비관적 락 적용.pdf](https://github.com/user-attachments/files/30687884/default.pdf)
+
+##### [비관적 락 적용 상태 (SELECT ... FOR UPDATE) 로그 분석]
+**핵심 요약**: 첫 스레드가 Row-Level X-Lock을 점유하여 후속 스레드를 대기시키며, 실패할 99개 스레드는 UPDATE 쿼리를 단 한 번도 실행하지 않고 SELECT 단계에서 차단됩니다.
+
+- 선두 스레드 (thread-73): 전체 비즈니스 로직 완주
+```text
+1. [thread-73] getOneGoodsWithPessimisticLock : ... FOR UPDATE (SELECT 실행 및 X-Lock 점유)
+2. [thread-73] Total: 1 (재고 1개 확인)
+3. [thread-73] buyGoods : UPDATE reservation.goods SET quantity = quantity - 1 (재고 1 -> 0 차감)
+4. [thread-73] setOrderPending : INSERT INTO reservation.order_info ... (주문서 생성 완료)
+```
+- 결과: 가장 먼저 락을 획득한 thread-73만 SELECT $\rightarrow$ UPDATE $\rightarrow$ INSERT 과정을 거쳐 최종 성공했습니다.
+
+- 후속 스레드 99개 (thread-90, thread-23, thread-95 ...): UPDATE 문 미실행 및 안전한 거부
+
+```text
+1. [thread-23] getOneGoodsWithPessimisticLock : ... FOR UPDATE (SELECT 호출 후 Lock Wait 대기)
+2. (thread-73번의 COMMIT 완료 후 락 획득)
+3. [thread-23] Total: 1 (조회 결과 DTO 수령)
+4. java.lang.IllegalStateException: 이미 품절된 상품입니다. (GoodsService.java:54)
+```
+- 결과: SELECT ... FOR UPDATE 구문으로 차례대로 줄을 서서 들어왔으나, 이미 앞선 스레드에 의해 quantity = 0인 최신 데이터를 확인하게 됩니다.
+
+- 결론: 불필요한 UPDATE 및 INSERT 쿼리를 단 한 번도 실행하지 않고, 자바 if문 검증 단계에서 99개 요청 모두 안전하게 차단되었습니다.
+
+---
+
+#### 10,000명 대규모 동시 요청(Pessimistic Lock) 테스트 결과
+- [비관적 락 미적용] 
+
+
+- [비관적 락 적용]
+
