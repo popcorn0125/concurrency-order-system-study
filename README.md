@@ -84,6 +84,50 @@ CREATE TABLE reservation.member (
     - PG사 결제 성공 수신 시 프론트엔드가 결제 완료 API를 호출합니다.
     - 백엔드는 `merchant_uid` 및 `idx`(PK) 이중 검증을 거쳐 주문 상태를 `'PAID'`로 변경합니다. (외부 PG사 연동은 API 승인 수신 모킹으로 처리)
 
+###  주문 및 결제 시스템 전체 흐름도 (Order & Payment Sequence Diagram)
+
+```mermaid
+sequenceDiagram
+    autonumber
+    actor Client as  사용자
+    participant Controller as  OrderController
+    participant Service as  GoodsService
+    participant DB as  PostgreSQL DB
+
+    Client->>Controller: 1. 주문/결제 요청 (POST /order)
+    activate Controller
+
+    Controller->>Service: 2. 결제 비즈니스 로직 호출 (buyGoods)
+    activate Service
+
+    %% 1. 재고 조회
+    Service->>DB: 3. 상품 재고 조회 (SELECT)
+    DB-->>Service: 4. 재고 수량 반환 (quantity)
+
+    alt 재고 없음 (quantity <= 0)
+        Service-->>Controller: 예외 발생 (IllegalStateException)
+        Controller-->>Client: 400 Bad Request ("이미 품절된 상품입니다")
+    end
+
+    %% 2. 재고 차감
+    Service->>DB: 5. 재고 차감 (UPDATE quantity = quantity - 1)
+    DB-->>Service: 6. 수정된 Row 수 반환 (updateRow)
+
+    alt 차감 실패 (updateRow == 0)
+        Service-->>Controller: 예외 발생 (IllegalStateException)
+        Controller-->>Client: 400 Bad Request ("다른 분이 먼저 결제하여 품절되었습니다")
+    end
+
+    %% 3. 주문서 생성
+    Service->>DB: 7. 주문서 저장 (INSERT order_info)
+    DB-->>Service: 8. 주문서 생성 완료
+
+    Service-->>Controller: 9. 주문 성공 응답 반환
+    deactivate Service
+
+    Controller-->>Client: 10. 200 OK (주문 완료)
+    deactivate Controller
+```
 ---
 
 ## 5. 동시성 제어 해결 전략 (Pragmatic Approach)
