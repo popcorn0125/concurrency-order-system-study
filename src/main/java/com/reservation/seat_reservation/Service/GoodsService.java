@@ -39,9 +39,11 @@ public class GoodsService {
 
     @Transactional
     public OrderResponseDto buyGoods(GoodsReserveRequestDto requestDto) {
-
         // 상품 조회
-        GoodsResponseDto goods = goodsMapper.getOneGoods(requestDto.getGoodsIdx());
+//         GoodsResponseDto goods = goodsMapper.getOneGoods(requestDto.getGoodsIdx());
+
+        // 비관적 락(select ~ for update) 쿼리로 조회
+        GoodsResponseDto goods = goodsMapper.getOneGoodsWithPessimisticLock(requestDto.getGoodsIdx());
 
         if(goods == null) {
             throw new IllegalArgumentException("존재하지 않는 상품입니다. ");

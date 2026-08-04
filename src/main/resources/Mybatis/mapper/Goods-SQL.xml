@@ -29,6 +29,22 @@
 
     </select>
 
+    <!-- 비관적 락 적용 조회 쿼리 (select ... for update) -->
+    <select id="getOneGoodsWithPessimisticLock" resultType="com.reservation.seat_reservation.Dto.GoodsResponseDto">
+        select
+            g.idx,
+            g.goods_name as goodsName,
+            g.price,
+            g.quantity,
+            g.description,
+            g.registe_date,
+            c.category_name as categoryName
+        from reservation.goods g
+            join reservation.category c on g.category_idx = c.idx
+        where g.idx = #{goodsIdx}
+        FOR UPDATE
+    </select>
+
     <update id="buyGoods" >
         update reservation.goods
         set
