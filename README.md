@@ -146,6 +146,49 @@ sequenceDiagram
     - 후속 요청 스레드들은 앞선 트랜잭션이 커밋(`COMMIT`)될 때까지 DB 수준에서 대기(Lock Wait)합니다.
     - 1번 유저가 재고를 `0`으로 차감하고 나면, 대기하던 후속 스레드들은 조회를 할 때 이미 `quantity = 0`인 최신 상태를 확인하게 됩니다.
     - 이를 통해 **불필요한 DB `UPDATE` 쿼리를 실행해 보지도 않고, `SELECT` 단계에서 즉시 품절 예외(`IllegalStateException`)를 내뱉으며 안전하게 차단**됩니다.
+
+ ### 동시성 제어 주문 처리 흐름도 (Pessimistic Lock)
+
+```mermaid
+sequenceDiagram
+    autonumber
+    actor User as 사용자 (10,000명 동시 요청)
+    participant Service as GoodsService
+    participant DB as PostgreSQL DB
+    participant Order as OrderInfo Table
+
+    User->>Service: 1. 상품 선점 요청 (buyGoodsWithPessimisticLock)
+    activate Service
+
+    Note over Service,DB: 비관적 락(X-Lock) 점유 시도
+    Service->>DB: 2. SELECT ... WHERE idx = ? FOR UPDATE
+    activate DB
+
+    alt 선두 스레드 (락 획득 성공)
+        DB-->>Service: 3. 최신 재고 반환 (quantity = 1)
+        
+        alt 재고 존재 (quantity > 0)
+            Service->>DB: 4. UPDATE goods SET quantity = quantity - 1
+            DB-->>Service: 5. 재고 차감 완료 (Updates: 1)
+            
+            Service->>Order: 6. INSERT INTO order_info (order_status = 'PENDING')
+            Order-->>Service: 7. 주문서 생성 완료
+            
+            Service-->>User: 8. 성공 (200 OK)
+        else 재고 부족 (quantity <= 0)
+            Service-->>User: 8a. 실패 ("이미 품절된 상품입니다")
+        end
+
+    else 후속 9,999개 스레드 (Lock Wait 대기)
+        Note over DB: 선두 스레드 커밋 시까지 DB 수준에서 대기
+        DB-->>Service: 3a. 대기 해제 후 최신 재고 반환 (quantity = 0)
+        Service-->>User: 4a. 실패 (UPDATE 미실행 및 즉시 차단)
+    end
+
+    deactivate DB
+    deactivate Service
+```
+
 ---
 
 ## 6. 동시성 제어 검증 및 테스트 결과 (Concurrency Test Result)
