@@ -194,7 +194,8 @@ java.lang.IllegalStateException: 이미 품절된 상품입니다. (GoodsService
 
 #### 10,000명 대규모 동시 요청(Pessimistic Lock) 테스트 결과
 - [비관적 락 미적용] 
+<img width="1418" height="217" alt="Image" src="https://github.com/user-attachments/assets/0c259757-f640-46cd-9d97-40d1dbcd3057" />
 
 
 - [비관적 락 적용]
-
+<img width="1426" height="217" alt="Image" src="https://github.com/user-attachments/assets/ce69a692-0df0-41a9-9ccc-102130a8649a" />
