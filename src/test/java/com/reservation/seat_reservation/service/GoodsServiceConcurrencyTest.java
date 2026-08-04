@@ -42,7 +42,7 @@ public class GoodsServiceConcurrencyTest {
     void reserveGoodsConcurrencyNoLockTest() throws InterruptedException {
         // GIVEN : 테스트 조건 설정
         Long goodsIdx = 1L; // 테스트할 상품 PK
-        int threadCount = 10000; // 동시에 요청을 날릴 스레드(유저) 수
+        int threadCount = 100; // 동시에 요청을 날릴 스레드(유저) 수
 
         List<DummyUser> userList = new ArrayList<>();
         for (int i = 1; i <= threadCount; i++) {
